@@ -1,0 +1,800 @@
+import React, { type ReactElement, useEffect, useRef } from 'react'
+import { useHistory } from 'react-router-dom'
+import { Progress, Select } from 'antd'
+import * as echarts from 'echarts'
+import routes, { Path } from '#routers/constants'
+import { dateFormatHis, themeDark } from '#constants/appoint'
+import useFetchState from '#repositories/models'
+import { Theme } from '#repositories/models/recoil-state'
+import { AllGroups } from '#repositories/apis/base'
+import { autoConvertBits, isEmpty, throttle, timestampFormat } from '#utils/functions'
+import EChats from '#components/e-chats'
+import { toSelectOptionType } from '#components/table/model'
+import { Item as DeviceItem } from '#pages/devices/items/model'
+import { List as MSListApi } from '#pages/configs/media-server/api'
+import { DefaultMSSev, type Item as MSItem } from '#pages/configs/media-server/model'
+import { ServerHealth } from './api'
+import { type DeviceStatistics, type DiskUsageItem } from './model'
+import { type CancelTokenSourceType, getCancelSource } from '#utils/axios'
+
+// ------------------------------ health
+interface HealthChatState {
+	dates: string[]
+	data: number[] | number[][]
+	type: 'cpu' | 'network' | 'memory'
+	title: string
+	isDark: boolean
+}
+
+export const Health = (): ReactElement => {
+	const theme = new Theme()
+	const isDark = theme.state === themeDark
+
+	const [ memTotal, setMemTotal ] = useFetchState(0)
+	const [ cpuHealth, setCpuHealth ] = useFetchState<HealthChatState>({ dates: [], data: [], type: 'cpu', title: 'CPU', isDark })
+	const [ networkHealth, setNetworkHealth ] = useFetchState<HealthChatState>({ dates: [], data: [], type: 'network', title: '网络', isDark })
+	const [ memHealth, setMemHealth ] = useFetchState<HealthChatState>({ dates: [], data: [], type: 'memory', title: '内存', isDark })
+	const [ diskUsage, setDiskUsage ] = useFetchState<DiskUsageItem[]>([])
+	const [ deviceStatistics, setDeviceStatistics ] = useFetchState<DeviceStatistics | undefined>(undefined)
+	const [ accessProtocolGroup, setAccessProtocolGroup ] = useFetchState<{ [key: number]: number } | undefined>(undefined)
+
+	const fetch = (): void => {
+		void ServerHealth().then(
+			res => {
+				setMemTotal(res.data?.memTotal ?? 0)
+				const hardware = res.data?.hardware ?? []
+				const dates = hardware.map(
+					item => timestampFormat(item.timestamp, dateFormatHis)
+				)
+				setCpuHealth({
+					...cpuHealth,
+					dates,
+					data: hardware.map(
+						item => item.cpu
+					)
+				})
+				setNetworkHealth({
+					...networkHealth,
+					dates,
+					data: hardware.map(
+						item => [ parseFloat(item.network.upRate.toFixed(2)), parseFloat(item.network.downRate.toFixed(2)) ]
+					)
+				})
+				setMemHealth({
+					...memHealth,
+					dates,
+					data: hardware.map(
+						item => item.mem.used
+					)
+				})
+				setDeviceStatistics(res.data?.deviceStatistics)
+				setAccessProtocolGroup(res.data?.deviceStatistics?.accessProtocolGroup)
+				setDiskUsage(res.data?.diskUsage ?? [])
+			}
+		)
+	}
+
+	useEffect(
+		() => {
+			fetch()
+			const interval = setInterval(
+				fetch,
+				3000
+			)
+
+			return () => {
+				clearInterval(interval)
+			}
+		},
+		[]
+	)
+
+	return <ul className="home-chart-box">
+		<li><CDeviceStatistics isDark={ isDark } data={ deviceStatistics } /></li>
+		<li><CAccessProtocolGroup isDark={ isDark } data={ accessProtocolGroup ?? {} } /></li>
+		<li><HealthItem { ...cpuHealth } isDark={ isDark } max={ 100 } /></li>
+		<li><HealthItem { ...networkHealth } isDark={ isDark } max={ 100 } /></li>
+		<li><HealthItem { ...memHealth } isDark={ isDark } max={ memTotal } /></li>
+		<li><DiskUse isDark={ isDark } data={ diskUsage } /></li>
+	</ul>
+}
+
+interface LoadBalancingType {
+	in: number
+	out: number
+}
+
+export const CDeviceStatistics = ({ data }: { data: DeviceStatistics | undefined, isDark: boolean }): ReactElement => {
+	const history = useHistory()
+
+	const cancelTokenRef = useRef<CancelTokenSourceType | null>(null)
+	const fetchGroupsIntervalRef = useRef<any>(null)
+
+	const deviceOnlineCount = data?.deviceOnlineCount ?? 0
+	const deviceOfflineCount = data?.deviceOfflineCount ?? 0
+	const deviceCount = deviceOnlineCount + deviceOfflineCount
+
+	const channelOnlineCount = data?.channelOnlineCount ?? 0
+	const channelOfflineCount = data?.channelOfflineCount ?? 0
+	const channelCount = channelOnlineCount + channelOfflineCount
+
+	const [ activeMS, setActiveMS ] = useFetchState(0)
+	const [ msList, setMsList ] = useFetchState<MSItem[]>([])
+	const [ loadBalancing, setLoadBalancing ] = useFetchState<LoadBalancingType>({ in: 0, out: 0 })
+
+	const fetchGroups = (): void => {
+		cancelTokenRef.current?.cancel()
+		cancelTokenRef.current = getCancelSource()
+		void AllGroups({}, cancelTokenRef.current).then(
+			res => {
+				const data = { ...loadBalancing }
+				const records = res.data ?? []
+				records.forEach(
+					item => {
+						if (item.pub !== undefined && item.pub !== null && !isEmpty(item.pub.session_id)) {
+							data.in += 1
+						}
+
+						if (item.pull !== undefined && item.pull !== null && !isEmpty(item.pull.session_id)) {
+							data.in += 1
+						}
+
+						if (item.subs !== undefined && item.subs !== null) {
+							data.out += item.subs.length
+						}
+
+						if (item.pushs !== undefined && item.pushs !== null) {
+							data.out += item.pushs.length
+						}
+					}
+				)
+
+				setLoadBalancing(data)
+				fetchGroupsIntervalRef.current = setTimeout(
+					fetchGroups, 3000
+				)
+			}
+		)
+	}
+
+	useEffect(
+		() => {
+			void MSListApi({ all: true }).then(
+				res => {
+					const list = res.data?.list ?? []
+					setMsList(list)
+				}
+			)
+
+			return () => {
+				cancelTokenRef.current?.cancel()
+				clearTimeout(fetchGroupsIntervalRef.current as number)
+			}
+		},
+		[]
+	)
+
+	useEffect(
+		() => {
+			throttle(
+				() => {
+					cancelTokenRef.current?.cancel()
+					clearTimeout(fetchGroupsIntervalRef.current as number)
+
+					fetchGroups()
+				},
+				1000,
+				'fetchGroups'
+			)
+		},
+		[ activeMS ]
+	)
+
+	return <div className="device-statistics">
+		<div className="title">设备信息</div>
+		<div className="content">
+			<div className="device">
+				<Progress size={ 120 } format={ v => parseInt(`${ v ?? 0 }`) } percent={ parseFloat((deviceOnlineCount / deviceCount).toFixed(2)) * 100 } type="circle" />
+				<p>在线数: { deviceOnlineCount }</p>
+				<p>离线数: { deviceOfflineCount }</p>
+				<p className="cursor-pointer blue" onClick={ () => { history.push(routes[ Path.devices ].subs?.[ Path.deviceItems ].path ?? '') } }>总设备数: { deviceCount }</p>
+			</div>
+			<div className="channel">
+				<Progress size={ 120 } format={ v => parseInt(`${ v ?? 0 }`) } percent={ parseFloat((channelOnlineCount / channelCount).toFixed(2)) * 100 } type="circle" />
+				<p>在线数: { channelOnlineCount }</p>
+				<p>离线数: { channelOfflineCount }</p>
+				<p className="cursor-pointer blue" onClick={ () => { history.push(routes[ Path.devices ].subs?.[ Path.deviceChannels ].path ?? '') } }>总通道数: { channelCount }</p>
+			</div>
+		</div>
+		<div className="load-balancing">
+			<div className="ms-list">
+				<Select
+					className="ms-select"
+					showSearch
+					value={ activeMS }
+					onChange={ setActiveMS }
+					optionFilterProp="label"
+					options={ toSelectOptionType([ DefaultMSSev, ...msList.map(item => ({ value: item.id, title: item.name })) ]) }
+				/>
+			</div>
+			<EChats
+				options={
+					{
+						xAxis: {
+							max: 'dataMax'
+						},
+						yAxis: {
+							type: 'category',
+							data: [ '输入', '输出' ],
+							inverse: true,
+							animationDuration: 300,
+							animationDurationUpdate: 300,
+							max: 1
+						},
+						grid: {
+							top: '15px',
+							bottom: '85px',
+							left: '15px',
+							containLabel: true
+						},
+						series: [
+							{
+								realtimeSort: true,
+								type: 'bar',
+								data: [ loadBalancing.in, loadBalancing.out ],
+								label: {
+									show: true,
+									position: 'right',
+									valueAnimation: true
+								}
+							}
+						],
+						legend: {
+							show: true
+						},
+						animationDuration: 0,
+						animationDurationUpdate: 3000,
+						animationEasing: 'linear',
+						animationEasingUpdate: 'linear'
+					}
+				}
+			/>
+		</div>
+	</div>
+}
+
+export const CAccessProtocolGroup = ({ data, isDark }: { data: { [key: number]: number }, isDark: boolean }): ReactElement => <EChats
+	className="item"
+	options={
+		{
+			title: {
+				text: '接入类型',
+				textStyle: {
+					color: isDark ? 'rgba(255, 255, 255, .85)' : 'rgba(0, 0, 0, .88)'
+				}
+			},
+			tooltip: {
+				trigger: 'item'
+			},
+			legend: {
+				top: '15%',
+				left: 'center'
+			},
+			// title: {
+			//	 left: 'center',
+			//	 top: '10px',
+			//	 textStyle: {
+			//		 fontSize: 16,
+			//		 fontWeight: 'bold'
+			//	 }
+			// },
+			series: [
+				{
+					name: '接入类型',
+					type: 'pie',
+					radius: [ '40%', '70%' ],
+					center: [ '50%', '55%' ],
+					avoidLabelOverlap: false,
+					padAngle: 5,
+					itemStyle: {
+						borderRadius: 10
+					},
+					label: {
+						// position: 'center',
+						position: 'inside',
+						show: true,
+						fontWeight: 'bold',
+						fontSize: 12
+					},
+					emphasis: {
+						label: {
+							show: true,
+							fontSize: 25,
+							fontWeight: 'bold'
+						}
+
+					},
+					labelLine: {
+						show: true
+					},
+					data: Object.keys(data).map(
+						item => ({ value: data[ parseInt(item) ], name: (new DeviceItem({ accessProtocol: parseInt(item) })).accessProtocolExample() })
+					)
+				}
+			]
+		}
+	}
+/>
+
+export const DiskUse = ({ data, isDark }: { data: DiskUsageItem[], isDark: boolean }): ReactElement => {
+	const formatBytes = (bytes: number): string => {
+		if (bytes === 0) return '0 B'
+		const units = [ 'B', 'KB', 'MB', 'GB', 'TB' ]
+		const unitIndex = Math.floor(Math.log(bytes) / Math.log(1024))
+		const size = bytes / Math.pow(1024, unitIndex)
+
+		return `${ size.toFixed(1) } ${ units[ unitIndex ] }`
+	}
+
+	// 根据使用率获取颜色
+	const getColorByUsage = (percent: number): string => {
+		if (percent >= 90) return '#ff4d4f'
+		if (percent >= 80) return '#faad14'
+		if (percent >= 60) return '#1890ff'
+		return '#52c41a'
+	}
+
+	return <EChats
+		className="item"
+		options={
+			{
+				title: {
+					text: '磁盘使用情况统计',
+					left: 'center',
+					textStyle: {
+						fontSize: 16,
+						fontWeight: 'bold',
+						color: isDark ? 'rgba(255, 255, 255, .85)' : 'rgba(0, 0, 0, .88)'
+					}
+				},
+				tooltip: {
+					trigger: 'axis',
+					axisPointer: {
+						type: 'shadow'
+					},
+					formatter: function(params: any) {
+						const usedParam = params.find((item: any) => item.seriesName === '已使用')
+						const freeParam = params.find((item: any) => item.seriesName === '未使用')
+
+						if (isEmpty(usedParam) || isEmpty(freeParam)) return ''
+
+						const total = usedParam.value + freeParam.value
+						const usedPercent = ((usedParam.value / total) * 100).toFixed(1)
+
+						return `
+							<div style="font-weight: bold; margin-bottom: 5px;">${ usedParam.name }</div>
+							<div style="display: flex; align-items: center; margin: 3px 0;">
+							  <span style="display: inline-block; width: 10px; height: 10px; background: ${ usedParam.color }; margin-right: 5px; border-radius: 2px;"></span>
+							  <span>已使用: ${ formatBytes(usedParam.value as number) } (${ usedPercent }%)</span>
+							</div>
+							<div style="display: flex; align-items: center; margin: 3px 0;">
+							  <span style="display: inline-block; width: 10px; height: 10px; background: ${ freeParam.color }; margin-right: 5px; border-radius: 2px;"></span>
+							  <span>未使用: ${ formatBytes(freeParam.value as number) }</span>
+							</div>
+							<div style="margin-top: 5px; font-weight: bold;">
+							  总计: ${ formatBytes(total as number) }
+							</div>
+						`
+					}
+				},
+				grid: {
+					left: '3%',
+					right: '4%',
+					bottom: '3%',
+					top: '60px',
+					containLabel: true
+				},
+				xAxis: {
+					type: 'category',
+					data: data.map(item => {
+						const parts = item.device.split('/')
+						return parts[ parts.length - 1 ] ?? item.device
+					}),
+					axisLabel: {
+						rotate: 45,
+						fontSize: 10
+					},
+					name: '设备路径',
+					nameLocation: 'end',
+					nameGap: 15,
+					nameTextStyle: {
+						fontSize: 12,
+						fontWeight: 'bold'
+					},
+					boundaryGap: false
+				},
+				yAxis: {
+					type: 'value',
+					nameTextStyle: {
+						fontSize: 12,
+						fontWeight: 'bold'
+					},
+					axisLabel: {
+						formatter: function(value: number) {
+							return formatBytes(value)
+						}
+					}
+				},
+				series: [
+					{
+						name: '已使用',
+						type: 'bar',
+						stack: 'total',
+						emphasis: {
+							focus: 'series'
+						},
+						data: data.map(item => ({
+							value: item.used_bytes,
+							itemStyle: {
+								color: getColorByUsage(item.used_percent)
+							}
+						})),
+						itemStyle: {
+							color: function(params: any) {
+								const index = params.dataIndex
+								return getColorByUsage(data[ index ].used_percent)
+							}
+						},
+						label: {
+							show: true,
+							position: 'inside',
+							formatter: function(params: any) {
+								const percent = ((params.value / (params.value + data[ params.dataIndex ].free_bytes)) * 100).toFixed(1)
+								return `${ percent }%`
+							},
+							color: '#fff',
+							fontWeight: 'bold',
+							fontSize: 10
+						}
+					},
+					{
+						name: '未使用',
+						type: 'bar',
+						stack: 'total',
+						emphasis: {
+							focus: 'series'
+						},
+						data: data.map(item => item.free_bytes),
+						itemStyle: {
+							color: '#e8eaed'
+						},
+						label: {
+							show: true,
+							position: 'top',
+							formatter: function(params: any) {
+								return formatBytes(params.value as number)
+							},
+							fontSize: 10
+						}
+					}
+				]
+				// dataZoom: [
+				//	 {
+				//		 type: 'inside',
+				//		 start: 0,
+				//		 end: 100
+				//	 },
+				//	 {
+				//		 type: 'slider',
+				//		 start: 0,
+				//		 end: 100,
+				//		 bottom: '80px'
+				//	 }
+				// ]
+			}
+		}
+	/>
+}
+
+export const HealthItem = (props: HealthChatState & { max: number }): ReactElement => {
+	const innerItem = {
+		name: props.title,
+		type: 'line',
+		stack: 'Total',
+		smooth: true,
+		lineStyle: {
+			width: 0
+		},
+		showSymbol: false,
+		label: {
+			show: true,
+			position: 'top'
+		},
+		areaStyle: {
+			opacity: 0.8,
+			color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+				{
+					offset: 0,
+					color: 'rgb(224, 62, 76)'
+				},
+				{
+					offset: 1,
+					color: '#80FFA5'
+				}
+			])
+		},
+		emphasis: {
+			focus: 'series'
+		}
+	}
+	let yAxis: any = {
+		type: 'value',
+		max: props.max
+	}
+	let series: any = [
+		{
+			...innerItem,
+			data: props.data
+		}
+	]
+	let formatter: any = function(params: any[]) {
+		if (props.max <= 0) {
+			return `${ params[ 0 ].axisValue }: <span style="color: #FF0087">${ params[ 0 ].data.toFixed(2) }%</span>`
+		}
+		return `${ params[ 0 ].axisValue }: <span style="color: #FF0087">${ ((params[ 0 ].data / props.max) * 100).toFixed(2) }%</span>`
+	}
+	if (props.type === 'network') {
+		const up: number[] = []
+		const down: number[] = []
+		for (let i = 0; i < props.data.length; i++) {
+			const item = props.data[ i ] as number[]
+			up.push(item[ 0 ])
+			down.push(item[ 1 ])
+		}
+		series = [
+			{ ...innerItem, name: '上行', data: up },
+			{ ...innerItem, name: '下行', data: down }
+		]
+		yAxis = { type: 'value' }
+		formatter = function(params: any[]) {
+			const up = autoConvertBits(params[ 0 ].data as number)
+			const down = autoConvertBits(params[ 1 ].data as number)
+			return `${ params[ 0 ].axisValue }<br/>上行: <span style="color: #FF0087">${ up.value }${ up.unit }</span><br/>下行: <span style="color: #FF0087">${ down.value }${ down.unit }</span>`
+		}
+	}
+
+	return <EChats
+		className="item"
+		options={
+			{
+				title: {
+					text: props.title,
+					textStyle: {
+						color: props.isDark ? 'rgba(255, 255, 255, .85)' : 'rgba(0, 0, 0, .88)'
+					}
+				},
+				tooltip: {
+					trigger: 'axis',
+					axisPointer: {
+						type: 'cross',
+						label: {
+							backgroundColor: '#6a7985'
+						}
+					},
+					formatter
+				},
+				grid: {
+					left: '3%',
+					right: '4%',
+					bottom: '3%',
+					containLabel: true
+				},
+				xAxis: [
+					{
+						type: 'category',
+						boundaryGap: false,
+						data: props.dates
+					}
+				],
+				yAxis,
+				series
+			}
+		}
+	/>
+}
+
+// ------------------------------ server
+
+enum SevType {
+	cpu = 'cpu',
+	mem = 'mem'
+}
+
+interface SevChatState {
+	dates: string[]
+	list: any[]
+	headers: string[]
+}
+
+export const Server = (): ReactElement => {
+	const [ memTotal, setMemTotal ] = useFetchState(0)
+	const [ sevCpuList, setSevCpuList ] = useFetchState<SevChatState>({
+		dates: [],
+		list: [],
+		headers: []
+	})
+	const [ sevMemList, setSevMemList ] = useFetchState<SevChatState>({
+		dates: [],
+		list: [],
+		headers: []
+	})
+	const fetch = (): void => {
+		void ServerHealth().then(
+			res => {
+				setMemTotal(res.data?.memTotal ?? 0)
+				const data = res.data?.services ?? []
+				const dates: string[] = []
+				for (let i = 0; i < data.length; i++) {
+					const v = data[ i ]
+					for (let j = 0; j < v.length; j++) {
+						const item = v[ j ]
+						if (isEmpty(dates[ i ])) {
+							dates[ i ] = timestampFormat(item.timestamp, dateFormatHis)
+						}
+					}
+				}
+
+				const headers: { [key: string]: string } = {}
+				const maps: { [key in SevType]: { [key: string]: number[] } } = {
+					mem: {},
+					cpu: {}
+				}
+				for (let i = 0; i < data.length; i++) {
+					const v = data[ i ]
+					for (let j = 0; j < v.length; j++) {
+						const item = v[ j ]
+						if (isEmpty(maps.cpu[ item.name ])) {
+							maps.cpu[ item.name ] = []
+						}
+						if (isEmpty(maps.mem[ item.name ])) {
+							maps.mem[ item.name ] = []
+						}
+						if (isEmpty(headers[ item.name ])) {
+							headers[ item.name ] = item.name
+						}
+
+						maps.cpu[ item.name ].push(parseFloat(item.cpu.toFixed(2)))
+						maps.mem[ item.name ].push(item.mem)
+					}
+				}
+
+				const sevCpuList: SevChatState = {
+					dates,
+					headers: Object.keys(headers),
+					list: []
+				}
+				for (const key in maps.cpu) {
+					sevCpuList.list.push(
+						SevSeriesItem(maps.cpu[ key ], key)
+					)
+				}
+				setSevCpuList(sevCpuList)
+
+				const sevMemList: SevChatState = {
+					dates,
+					headers: Object.keys(headers),
+					list: []
+				}
+				for (const key in maps.mem) {
+					sevMemList.list.push(
+						SevSeriesItem(maps.mem[ key ], key)
+					)
+				}
+				setSevMemList(sevMemList)
+			}
+		)
+	}
+
+	useEffect(
+		() => {
+			fetch()
+			const interval = setInterval(
+				fetch,
+				1000
+			)
+
+			return () => {
+				clearInterval(interval)
+			}
+		},
+		[]
+	)
+
+	return <>
+		<ul className="home-chart-box">
+			<li><SevItem { ...sevCpuList } max={ 100 } title="cpu" /></li>
+			<li><SevItem { ...sevMemList } max={ memTotal } title="memory" /></li>
+		</ul>
+	</>
+}
+
+function SevSeriesItem(data: number[], name: string): any {
+	return {
+		name,
+		type: 'line',
+		stack: 'Total',
+		smooth: true,
+		lineStyle: {
+			width: 0
+		},
+		showSymbol: false,
+		areaStyle: {
+			opacity: 0.8,
+			color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+				{
+					offset: 0,
+					color: 'rgb(128, 255, 165)'
+				},
+				{
+					offset: 1,
+					color: 'rgb(1, 191, 236)'
+				}
+			])
+		},
+		emphasis: {
+			focus: 'series'
+		},
+		data
+	}
+}
+
+export const SevItem = (props: SevChatState & { max: number, title: string }): ReactElement => {
+	return <EChats
+		className="item"
+		options={
+			{
+				color: [ '#80FFA5', '#00DDFF', '#37A2FF', '#FF0087', '#FFBF00' ],
+				title: {
+					text: props.title
+				},
+				tooltip: {
+					trigger: 'axis',
+					axisPointer: {
+						type: 'cross',
+						label: {
+							backgroundColor: '#6a7985'
+						}
+					}
+				},
+				legend: {
+					type: 'scroll',
+					orient: 'horizontal',
+					padding: [ 5, 200, 5, 0 ],
+					pageIconSize: 12,
+					pageTextStyle: {
+						color: '#333'
+					},
+					data: props.headers
+				},
+				grid: {
+					left: '3%',
+					right: '4%',
+					bottom: '3%',
+					containLabel: true
+				},
+				xAxis: [
+					{
+						type: 'category',
+						boundaryGap: false,
+						data: props.dates
+					}
+				],
+				yAxis: {
+					type: 'value',
+					max: props.max
+				},
+				series: props.list
+			}
+		}
+	/>
+}

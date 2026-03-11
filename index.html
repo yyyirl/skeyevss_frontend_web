@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/logo192.png" />
+
+    <meta name="viewport" width="device-width">
+    <meta name="viewport" initial-scale="1">
+    <meta name="viewport" maximum-scale="1">
+    <meta name="viewport" user-scalable="no">
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="%VITE_DESCRIPTION%" />
+    <meta name="keywords" content="%VITE_KEYWORDS%" />
+
+    <link rel="manifest" href="/manifest.json" />
+
+    <title>%VITE_TITLE%</title>
+
+    <script src="/assets/js/video/live/liveplayer-element.min.js"></script>
+    <script src="/assets/js/video/jessibuca/skeyeplayer-pro.js"></script>
+    <script>
+        // // TODO 暂时解决 /assets/js/video/live/liveplayer-element.min.js报错
+        // const originalError = console.error
+        // console.error = (...args) => {
+        //     if (typeof args[ 0 ] === 'string' && args[ 0 ].includes('findDOMNode')) {
+        //         return
+        //     }
+        //     originalError.call(console, ...args)
+        // }
+    </script>
+</head>
+<body>
+<noscript>You need to enable JavaScript to run this app.</noscript>
+<div id="root"></div>
+<script type="module" src="/src/index.tsx"></script>
+</body>
+</html>

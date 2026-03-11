@@ -1,0 +1,90 @@
+{
+	"compilerOptions": {
+		"experimentalDecorators": true,
+		"emitDecoratorMetadata": true,
+		"baseUrl": ".",
+		"paths": {
+			"#/*": [
+				"./src/*"
+			],
+			"#databases/*": [
+				"./src/databases/*"
+			],
+			"#types/*": [
+				"./src/types/*"
+			],
+			"#assets/*": [
+				"./src/assets/*"
+			],
+			"#assets": [
+				"./src/assets"
+			],
+			"#constants/*": [
+				"./src/constants/*"
+			],
+			"#constants": [
+				"./src/constants"
+			],
+			"#utils/*": [
+				"./src/utils/*"
+			],
+			"#utils": [
+				"./src/utils"
+			],
+			"#pages/*": [
+				"./src/pages/*"
+			],
+			"#pages": [
+				"./src/pages"
+			],
+			"#components/*": [
+				"./src/components/*"
+			],
+			"#components": [
+				"./src/components"
+			],
+			"#repositories/*": [
+				"./src/repositories/*"
+			],
+			"#repositories": [
+				"./src/repositories"
+			],
+			"#routers/*": [
+				"./src/routers/*"
+			],
+			"#routers": [
+				"./src/routers"
+			]
+		},
+		"target": "es5",
+		"lib": [
+			"dom",
+			"dom.iterable",
+			"esnext",
+			"webworker"
+		],
+		"allowJs": true,
+        "skipLibCheck": true,
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "strict": true,
+        "forceConsistentCasingInFileNames": true,
+        "noFallthroughCasesInSwitch": true,
+        "module": "esnext",
+        "moduleResolution": "node",
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "noEmit": true,
+        "jsx": "react-jsx",
+        "typeRoots": [
+            "./node_modules/@types",
+            "./"
+        ]
+    },
+    "include": [
+        "src",
+        "./src/**/*",
+        ".eslintrc.js",
+        "./types"
+    ]
+}

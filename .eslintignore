@@ -1,0 +1,5 @@
+# jest
+jest.config.*
+.eslintrc.js
+node_modules/
+.idea/

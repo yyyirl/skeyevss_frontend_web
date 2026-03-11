@@ -1,0 +1,55 @@
+import { proxy, route, service } from '#utils/axios'
+import type { FetchListResponse } from '#repositories/types/response'
+import type { Response } from '#types/axios.d'
+import { type InternalAxiosRequestConfig } from 'axios/index'
+import type { CreateRequestCall, DeleteRequestCall, FetchQueryListParams, UpdateRequestCall } from '#repositories/types/request'
+import { Item } from './model'
+import { type OptionItem } from '#types/base'
+
+export const Create: CreateRequestCall = async data => {
+	return await service({
+		url: proxy(route.backend, '/ms'),
+		method: 'post',
+		data
+	} as unknown as InternalAxiosRequestConfig)
+}
+
+export const Delete: DeleteRequestCall = async data => {
+	return await service({
+		url: proxy(route.backend, '/ms'),
+		method: 'delete',
+		data
+	} as unknown as InternalAxiosRequestConfig)
+}
+
+export const Update: UpdateRequestCall = async data => {
+	return await service({
+		url: proxy(route.backend, '/ms'),
+		method: 'put',
+		data
+	} as unknown as InternalAxiosRequestConfig)
+}
+
+export const List = async <T = Response<FetchListResponse<Item>>>(data: FetchQueryListParams<Item>): Promise<T> => {
+	return await service({
+		url: proxy(route.backend, '/ms/list'),
+		method: 'post',
+		data,
+		transformType: Item,
+		transformPropertyPath: [ 'list' ]
+	} as unknown as InternalAxiosRequestConfig)
+}
+
+export const Options = async <T = Response<OptionItem[]>>(): Promise<T> => {
+	return await service({
+		url: proxy(route.backend, '/ms-options'),
+		method: 'get'
+	} as unknown as InternalAxiosRequestConfig)
+}
+
+export const Row = async <T = Response<Item>>(id: string | number): Promise<T> => {
+	return await service({
+		url: proxy(route.backend, `/ms/${ id }`),
+		method: 'get'
+	} as unknown as InternalAxiosRequestConfig)
+}
