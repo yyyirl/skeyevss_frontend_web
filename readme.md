@@ -9,7 +9,7 @@
 
 - 开发环境 `React(18.2.0)` `Typescript`，`node`
 
-- 接口服务 [https://github.com/yyyirl/skeyevss_backend_service](https://github.com/yyyirl/skeyevss_backend_service)
+- 接口服务 [go-vss](https://github.com/openskeye/go-vss)
 
 - env配置（cp .env.dev .env.dev）
 
